@@ -78,10 +78,52 @@ export const muteUserSchema = {
 };
 
 /**
+ * Function schema for managing content filter settings
+ */
+export const filterSettingsSchema = {
+  name: 'filterSettings',
+  description: 'Manages the content filter settings for the Discord server',
+  parameters: {
+    type: 'object',
+    properties: {
+      enabled: {
+        type: 'boolean',
+        description: 'Whether to enable or disable the content filter'
+      }
+    },
+    required: ['enabled']
+  }
+};
+
+/**
+ * Function schema for warning users about inappropriate behavior
+ */
+export const warnUserSchema = {
+  name: 'warnUser',
+  description: 'Issues a warning to a user about inappropriate behavior',
+  parameters: {
+    type: 'object',
+    properties: {
+      userId: {
+        type: 'string',
+        description: 'The Discord user ID or @mention of the user to warn'
+      },
+      reason: {
+        type: 'string',
+        description: 'The reason for warning the user'
+      }
+    },
+    required: ['userId', 'reason']
+  }
+};
+
+/**
  * Collection of all moderation tool schemas
  */
 export const moderationTools = [
   kickUserSchema,
   banUserSchema,
-  muteUserSchema
+  muteUserSchema,
+  filterSettingsSchema,
+  warnUserSchema
 ];

@@ -4,20 +4,24 @@
  */
 
 import { Client, GuildMember, User, Guild, TextChannel, PermissionFlagsBits, Role, Collection, ChannelType } from 'discord.js';
+import { FilterManager } from './filterManager';
 
 export class ModerationService {
   private client: Client;
-  private muteRoles: Map<string, string>; // Map of guild ID to mute role ID
-  private mutedUsers: Map<string, NodeJS.Timeout>; // Map of user IDs to their unmute timeouts
+  private muteRoles: Map<string, string>;
+  private mutedUsers: Map<string, NodeJS.Timeout>;
+  private filterManager: FilterManager;
 
   /**
    * Creates a new moderation service instance
    * @param client Discord client instance
+   * @param filterManager FilterManager instance
    */
-  constructor(client: Client) {
+  constructor(client: Client, filterManager: FilterManager) {
     this.client = client;
     this.muteRoles = new Map();
     this.mutedUsers = new Map();
+    this.filterManager = filterManager; // Initialize filterManager
   }
 
   /**
@@ -73,6 +77,46 @@ export class ModerationService {
   private async checkBotPermission(guild: Guild, permission: bigint): Promise<boolean> {
     const botMember = await guild.members.fetchMe();
     return botMember.permissions.has(permission);
+  }
+
+  /**
+   * Checks if a user has administrator permissions
+   */
+  private async checkAdminPermission(guild: Guild, userId: string): Promise<boolean> {
+    const member = await guild.members.fetch(userId);
+    return member.permissions.has(PermissionFlagsBits.Administrator);
+  }
+
+  /**
+   * Manages content filter settings for a guild
+   */
+  async setFilterSettings(guildId: string, userId: string, enabled: boolean): Promise<string> {
+    const guild = this.client.guilds.cache.get(guildId);
+    if (!guild) return 'Error: I cannot find this server.';
+
+    // Check if user has admin permissions
+    if (!await this.checkAdminPermission(guild, userId)) {
+      return 'Error: Only administrators can manage filter settings.';
+    }
+
+    return await this.filterManager.setFilterEnabled(guildId, enabled);
+  }
+
+  /**
+   * Issues a warning to a user
+   */
+  async warnUser(guildId: string, userId: string, reason: string): Promise<string> {
+    const guild = this.client.guilds.cache.get(guildId);
+    if (!guild) return 'Error: I cannot find this server.';
+
+    return await this.filterManager.warnUser(guildId, userId, reason);
+  }
+
+  /**
+   * Processes a message for content filtering
+   */
+  async processMessage(message: any): Promise<void> {
+    await this.filterManager.processMessage(message);
   }
 
   /**
