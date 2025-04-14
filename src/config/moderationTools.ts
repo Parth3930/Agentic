@@ -118,6 +118,11 @@ export const warnUserSchema = {
 };
 
 /**
+ * Import server management tools
+ */
+import { serverManagementTools } from './serverManagementTools';
+
+/**
  * Collection of all moderation tool schemas
  */
 export const moderationTools = [
@@ -125,5 +130,6 @@ export const moderationTools = [
   banUserSchema,
   muteUserSchema,
   filterSettingsSchema,
-  warnUserSchema
+  warnUserSchema,
+  ...serverManagementTools
 ];

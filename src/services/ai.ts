@@ -6,6 +6,7 @@
 import { Mistral } from '@mistralai/mistralai';
 import { CharacterConfig } from '../config/character';
 import { moderationTools } from '../config/moderationTools';
+import { serverManagementTools } from '../config/serverManagementTools';
 import { ChatCompletionResponse, Tool } from '@mistralai/mistralai/models/components';
 
 export interface FunctionCall {
@@ -21,7 +22,9 @@ export interface AIResponse {
 export class AIService {
   private mistralClient: Mistral;
   private character: CharacterConfig;
-  private tools: Tool[];
+  private moderationTools: Tool[];
+  private serverTools: Tool[];
+  private allTools: Tool[];
 
   /**
    * Creates a new AI service instance
@@ -31,13 +34,27 @@ export class AIService {
   constructor(apiKey: string, character: CharacterConfig) {
     this.mistralClient = new Mistral({ apiKey });
     this.character = character;
-    this.tools = moderationTools.map(tool => ({
+    
+    // Initialize moderation tools
+    this.moderationTools = moderationTools.map(tool => ({
       function: {
         name: tool.name,
         description: tool.description,
         parameters: tool.parameters
       }
     })) as Tool[];
+    
+    // Initialize server management tools
+    this.serverTools = serverManagementTools.map(tool => ({
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters
+      }
+    })) as Tool[];
+    
+    // Combine all tools
+    this.allTools = [...this.moderationTools, ...this.serverTools];
   }
 
   /**
@@ -46,7 +63,7 @@ export class AIService {
    * @param enableModeration Whether to enable moderation tools
    * @returns AI-generated response with optional function call
    */
-  async generateResponse(query: string, enableModeration: boolean = false): Promise<AIResponse> {
+  async generateResponse(query: string, enableModeration: boolean = false, enableServerTools: boolean = false): Promise<AIResponse> {
     try {
       const requestOptions = {
         model: this.character.model,
@@ -56,9 +73,16 @@ export class AIService {
         ],
       };
       
-      // Add tools if moderation is enabled
-      if (enableModeration) {
-        Object.assign(requestOptions, { tools: this.tools });
+      // Add appropriate tools based on enabled features
+      if (enableModeration && enableServerTools) {
+        // Add all tools if both features are enabled
+        Object.assign(requestOptions, { tools: this.allTools });
+      } else if (enableModeration) {
+        // Add only moderation tools
+        Object.assign(requestOptions, { tools: this.moderationTools });
+      } else if (enableServerTools) {
+        // Add only server management tools
+        Object.assign(requestOptions, { tools: this.serverTools });
       }
       
       const chatResponse = await this.mistralClient.chat.complete({

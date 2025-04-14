@@ -1,9 +1,10 @@
 /**
  * Moderation service for the Agentic Discord bot
  * Handles moderation actions like kick, ban, and mute
+ * Also handles server management actions like creating channels and categories
  */
 
-import { Client, GuildMember, User, Guild, TextChannel, PermissionFlagsBits, Role, Collection, ChannelType } from 'discord.js';
+import { Client, GuildMember, User, Guild, TextChannel, PermissionFlagsBits, Role, Collection, ChannelType, CategoryChannel, GuildChannelCreateOptions, ColorResolvable, EmbedBuilder, MessageCreateOptions } from 'discord.js';
 import { FilterManager } from './filterManager';
 
 export class ModerationService {
@@ -362,6 +363,330 @@ export class ModerationService {
     } catch (error) {
       console.error('Error timing out user:', error);
       return `Error: Failed to timeout ${member.user.username}.`;
+    }
+  }
+
+  /**
+   * Resolves a channel ID or name to a channel
+   * @param guild The guild where the action is taking place
+   * @param channelIdOrName Channel ID or name
+   * @returns The resolved channel or null if not found
+   */
+  private async resolveChannel(guild: Guild, channelIdOrName: string): Promise<TextChannel | CategoryChannel | null> {
+    try {
+      // First try direct ID fetch
+      if (channelIdOrName.match(/^\d+$/)) {
+        const channel = await guild.channels.fetch(channelIdOrName);
+        if (channel && (channel.type === ChannelType.GuildText || 
+                       channel.type === ChannelType.GuildVoice || 
+                       channel.type === ChannelType.GuildCategory || 
+                       channel.type === ChannelType.GuildAnnouncement)) {
+          return channel as TextChannel | CategoryChannel;
+        }
+      }
+      
+      // If not an ID, try to find by name
+      const lowerName = channelIdOrName.toLowerCase();
+      
+      // Find channel by name or partial match
+      const channel = guild.channels.cache.find(c => {
+        // Check for exact name match
+        if (c.name.toLowerCase() === lowerName) return true;
+        // Check for partial name match
+        if (c.name.toLowerCase().includes(lowerName)) return true;
+        return false;
+      });
+      
+      if (channel && (channel.type === ChannelType.GuildText || 
+                     channel.type === ChannelType.GuildVoice || 
+                     channel.type === ChannelType.GuildCategory || 
+                     channel.type === ChannelType.GuildAnnouncement)) {
+        return channel as TextChannel | CategoryChannel;
+      }
+      
+      return null;
+    } catch (error) {
+      console.error(`Failed to resolve channel ${channelIdOrName}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Creates a new category in a Discord server
+   * @param guildId The ID of the guild
+   * @param name The name of the category
+   * @param position The position of the category (optional)
+   * @returns Result message
+   */
+  async createCategory(guildId: string, name: string, position?: number): Promise<string> {
+    const guild = this.client.guilds.cache.get(guildId);
+    if (!guild) return 'Error: I cannot find this server.';
+
+    // Check bot permissions
+    if (!await this.checkBotPermission(guild, PermissionFlagsBits.ManageChannels)) {
+      return 'Error: I don\'t have permission to manage channels.';
+    }
+
+    try {
+      const options: GuildChannelCreateOptions = { name };
+      if (position !== undefined) options.position = position;
+
+      await guild.channels.create({
+        ...options,
+        type: ChannelType.GuildCategory
+      });
+
+      return `Successfully created category '${name}'.`;
+    } catch (error) {
+      console.error('Error creating category:', error);
+      return `Error: Failed to create category '${name}'.`;
+    }
+  }
+
+  /**
+   * Creates a new channel in a Discord server
+   * @param guildId The ID of the guild
+   * @param name The name of the channel
+   * @param type The type of channel (text, voice, announcement)
+   * @param categoryId The ID of the category to place the channel in (optional)
+   * @param topic The topic of the channel (optional, text channels only)
+   * @returns Result message
+   */
+  async createChannel(guildId: string, name: string, type: string, categoryId?: string, topic?: string): Promise<string> {
+    console.log(`Creating channel: name=${name}, type=${type}, categoryId=${categoryId || 'none'}, guildId=${guildId}`);
+const guild = this.client.guilds.cache.get(guildId);
+if (!guild) {
+  console.error(`Guild not found with ID: ${guildId}`);
+  return 'Error: I cannot find this server.';
+}
+
+// Check bot permissions
+const hasPermission = await this.checkBotPermission(guild, PermissionFlagsBits.ManageChannels);
+console.log(`Bot has ManageChannels permission: ${hasPermission}`);
+if (!hasPermission) {
+  return 'Error: I don\'t have permission to manage channels.';
+}
+
+// Resolve channel type
+let channelType: ChannelType;
+switch (type.toLowerCase()) {
+  case 'text':
+    channelType = ChannelType.GuildText;
+    break;
+  case 'voice':
+    channelType = ChannelType.GuildVoice;
+    break;
+  case 'announcement':
+    channelType = ChannelType.GuildAnnouncement;
+    break;
+  default:
+    return `Error: Invalid channel type '${type}'. Valid types are: text, voice, announcement.`;
+}
+
+// Resolve category if provided
+let parent: CategoryChannel | null = null;
+if (categoryId) {
+  const category = await this.resolveChannel(guild, categoryId);
+  if (!category) {
+    return `Error: Could not find category '${categoryId}'.`;
+  }
+  if (category.type !== ChannelType.GuildCategory) {
+    return `Error: '${categoryId}' is not a category.`;
+  }
+  parent = category as CategoryChannel;
+}
+
+try {
+  console.log(`Attempting to create channel with options: name=${name}, type=${channelType}`);
+  
+  // Create the channel with the correct options format
+  const channel = await guild.channels.create({
+    name,
+    type: channelType,
+    parent: parent || undefined,
+    topic: topic && (channelType === ChannelType.GuildText || channelType === ChannelType.GuildAnnouncement) ? topic : undefined
+  });
+
+  console.log(`Successfully created channel: ${channel.name} (${channel.id})`);
+  return `Successfully created ${type} channel '${name}'${parent ? ` in category '${parent.name}'` : ''}.`;
+} catch (error) {
+  console.error('Error creating channel:', error);
+  // Provide more detailed error information
+  const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+  return `Error: Failed to create channel '${name}'. Reason: ${errorMessage}`;
+}
+  }
+
+  /**
+   * Deletes a channel from a Discord server
+   * @param guildId The ID of the guild
+   * @param channelId The ID or name of the channel to delete
+   * @param reason The reason for deleting the channel (optional)
+   * @returns Result message
+   */
+  async deleteChannel(guildId: string, channelId: string, reason?: string): Promise<string> {
+    const guild = this.client.guilds.cache.get(guildId);
+    if (!guild) return 'Error: I cannot find this server.';
+
+    // Check bot permissions
+    if (!await this.checkBotPermission(guild, PermissionFlagsBits.ManageChannels)) {
+      return 'Error: I don\'t have permission to manage channels.';
+    }
+
+    // Resolve the channel
+    const channel = await this.resolveChannel(guild, channelId);
+    if (!channel) return `Error: Could not find channel '${channelId}'.`;
+
+    try {
+      const channelName = channel.name;
+      await channel.delete(reason || 'No reason provided');
+      return `Successfully deleted channel '${channelName}'.`;
+    } catch (error) {
+      console.error('Error deleting channel:', error);
+      return `Error: Failed to delete channel '${channel.name}'.`;
+    }
+  }
+
+  /**
+   * Deletes multiple messages from a channel in a Discord server
+   * @param guildId The ID of the guild
+   * @param channelId The ID or name of the channel to delete messages from
+   * @param amount The number of messages to delete (1-100)
+   * @param reason The reason for deleting the messages (optional)
+   * @returns Result message
+   */
+  async deleteMessages(guildId: string, channelId: string, amount: number, reason?: string): Promise<string> {
+    const guild = this.client.guilds.cache.get(guildId);
+    if (!guild) return 'Error: I cannot find this server.';
+
+    // Check bot permissions
+    if (!await this.checkBotPermission(guild, PermissionFlagsBits.ManageMessages)) {
+      return 'Error: I don\'t have permission to manage messages.';
+    }
+
+    // Validate amount
+    if (amount < 1 || amount > 100) {
+      return 'Error: Amount must be between 1 and 100.';
+    }
+
+    // Resolve the channel
+    const channel = await this.resolveChannel(guild, channelId);
+    if (!channel) return `Error: Could not find channel '${channelId}'.`;
+    
+    // Ensure it's a text channel
+    if (channel.type !== ChannelType.GuildText) {
+      return `Error: '${channel.name}' is not a text channel.`;
+    }
+
+    try {
+      const textChannel = channel as TextChannel;
+      const messages = await textChannel.bulkDelete(amount, true);
+      return `Successfully deleted ${messages.size} message(s) from '${textChannel.name}'.`;
+    } catch (error) {
+      console.error('Error deleting messages:', error);
+      // Handle specific error for messages older than 14 days
+      if (error instanceof Error && error.message.includes('14 days')) {
+        return 'Error: Cannot delete messages older than 14 days.';
+      }
+      return `Error: Failed to delete messages from '${channel.name}'.`;
+    }
+  }
+
+  /**
+   * Creates an embed message in a Discord channel
+   * @param guildId The ID of the guild
+   * @param channelId The ID or name of the channel to send the embed to
+   * @param title The title of the embed
+   * @param description The description of the embed
+   * @param color The color of the embed in hex format (optional)
+   * @param fields Fields to add to the embed (optional)
+   * @param footer The footer text of the embed (optional)
+   * @param image The URL of an image to display in the embed (optional)
+   * @param thumbnail The URL of a thumbnail to display in the embed (optional)
+   * @returns Result message
+   */
+  async createEmbed(
+    guildId: string, 
+    channelId: string, 
+    title: string, 
+    description: string, 
+    color?: string,
+    fields?: Array<{name: string, value: string, inline?: boolean}>,
+    footer?: string,
+    image?: string,
+    thumbnail?: string
+  ): Promise<string> {
+    const guild = this.client.guilds.cache.get(guildId);
+    if (!guild) return 'Error: I cannot find this server.';
+
+    // Check bot permissions
+    if (!await this.checkBotPermission(guild, PermissionFlagsBits.SendMessages)) {
+      return 'Error: I don\'t have permission to send messages.';
+    }
+
+    // Resolve the channel
+    const channel = await this.resolveChannel(guild, channelId);
+    if (!channel) return `Error: Could not find channel '${channelId}'.`;
+    
+    // Ensure it's a text channel
+    if (channel.type !== ChannelType.GuildText) {
+      return `Error: '${channel.name}' is not a text channel.`;
+    }
+
+    try {
+      const textChannel = channel as TextChannel;
+      
+      // Create the embed
+      const embed = new EmbedBuilder()
+        .setTitle(title)
+        .setDescription(description);
+      
+      // Set color if provided
+      if (color) {
+        try {
+          embed.setColor(color as ColorResolvable);
+        } catch (error) {
+          console.warn('Invalid color format, using default color:', error);
+        }
+      }
+      
+      // Add fields if provided
+      if (fields && fields.length > 0) {
+        fields.forEach(field => {
+          embed.addFields({
+            name: field.name,
+            value: field.value,
+            inline: field.inline || false
+          });
+        });
+      }
+      
+      // Set footer if provided
+      if (footer) {
+        embed.setFooter({ text: footer });
+      }
+      
+      // Set image if provided
+      if (image) {
+        embed.setImage(image);
+      }
+      
+      // Set thumbnail if provided
+      if (thumbnail) {
+        embed.setThumbnail(thumbnail);
+      }
+      
+      // Set timestamp
+      embed.setTimestamp();
+      
+      // Send the embed
+      const messageOptions: MessageCreateOptions = { embeds: [embed] };
+      await textChannel.send(messageOptions);
+      
+      return `Successfully sent embed message to '${textChannel.name}'.`;
+    } catch (error) {
+      console.error('Error creating embed:', error);
+      return `Error: Failed to send embed message to '${channel.name}'.`;
     }
   }
 }
